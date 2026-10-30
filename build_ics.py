@@ -18,14 +18,23 @@ DAYS_AHEAD = 30
 TZ = ZoneInfo("Europe/Moscow")
 OUT = "docs/dance.ics"
 
-# Какие занятия нужны: регулярки по названию направления (без учёта регистра).
-INCLUDE = [
-    r"стретчинг",
-    r"герли.*(начин|с 0|с нуля)",
-    r"хип-?хоп.*(начин|бейсик)",
-    r"джаз-?фанк.*(начин|с нуля)",
+# Какие занятия нужны. Проверяется название направления целиком (без учёта регистра и «ё»),
+# слова могут стоять в любом месте названия, начало не важно.
+#  1) Стретчинг — берём любые занятия.
+STRETCHING = r"стретчинг"
+#  2) Герли хип-хоп, хип-хоп и джаз-фанк — только если в названии есть и направление, и признак уровня «с нуля».
+DIRECTIONS = [
+    r"герли|girly",
+    r"хип[\s-]*хоп|hip[\s-]*hop",
+    r"джаз[\s-]*фанк|jazz[\s-]*funk",
 ]
+LEVEL = r"начин|с\s*0|с\s*нуля|нулев|basic|бейсик|бэйсик|beginner"
 EXCLUDE = []  # например [r"закрыт"], чтобы скрыть закрытые группы
+EXCLUDE_TEACHERS = ["Генин"]  # занятия этих преподавателей (по фамилии) скрываются
+
+# Этаж/как найти зал — API это не отдаёт, впишите сами, например:
+# "КЛОУЗ": "2 этаж, налево от лифта"
+HALL_NOTES = {}
 
 
 def post(path, body):
@@ -50,7 +59,11 @@ def teacher_name(t):
 
 def wanted(name):
     n = name.lower().replace("ё", "е")
-    return any(re.search(p, n) for p in INCLUDE) and not any(re.search(p, n) for p in EXCLUDE)
+    if any(re.search(p, n) for p in EXCLUDE):
+        return False
+    if re.search(STRETCHING, n):
+        return True
+    return any(re.search(p, n) for p in DIRECTIONS) and bool(re.search(LEVEL, n))
 
 
 def day_ts(d):
@@ -103,13 +116,18 @@ def main():
             substitutes[key] = teacher_name(c.get("teacher"))
 
     events = {}
+    events_teacher = {}
     for s in schedule + extra:
         if not wanted(style_name(s)):
             continue
         for d in dates:
             if not occurs_on(s, d) or (s["id"], d) in cancelled:
                 continue
+            teacher = substitutes.get((s["id"], d)) or teacher_name((s.get("group") or {}).get("teacher1"))
+            if any(x.lower() in teacher.lower() for x in EXCLUDE_TEACHERS):
+                continue
             events[(s["id"], d)] = (s, d)
+            events_teacher[(s["id"], d)] = teacher
 
     now = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     lines = [
@@ -121,12 +139,18 @@ def main():
     for (sid, d), (s, _) in sorted(events.items(), key=lambda kv: (kv[0][1], kv[1][0]["minutesBegin"])):
         start = datetime(d.year, d.month, d.day, tzinfo=TZ) + timedelta(minutes=s["minutesBegin"])
         end = datetime(d.year, d.month, d.day, tzinfo=TZ) + timedelta(minutes=s["minutesEnd"])
-        teacher = substitutes.get((sid, d)) or teacher_name((s.get("group") or {}).get("teacher1"))
+        teacher = events_teacher[(sid, d)]
         surname = teacher.split()[-1] if teacher else ""
         title = style_name(s).strip()
         if (sid, d) in substitutes:
             title += " (замена)"
         hall = (s.get("hall") or {}).get("name")
+        area = (s.get("hall") or {}).get("area")
+        desc = "\\n".join(x for x in (
+            f"Преподаватель: {teacher}" if teacher else "",
+            f"Зал: {hall}" + (f", {area} м²" if area else "") if hall else "",
+            HALL_NOTES.get(hall, ""),
+        ) if x)
         fmt = lambda x: x.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         lines += [
             "BEGIN:VEVENT",
@@ -134,10 +158,10 @@ def main():
             f"DTSTAMP:{now}",
             f"DTSTART:{fmt(start)}",
             f"DTEND:{fmt(end)}",
-            f"SUMMARY:{title}",
-            # вторая строка события в Календаре — это LOCATION
-            f"LOCATION:{' · '.join(x for x in (surname, hall) if x)}",
-            f"DESCRIPTION:Преподаватель: {teacher}",
+            # "\\n" в iCalendar — перенос строки: фамилия окажется второй строкой названия
+            f"SUMMARY:{title}\\n{surname}" if surname else f"SUMMARY:{title}",
+            f"LOCATION:{hall or ''}",
+            f"DESCRIPTION:{desc}",
             "END:VEVENT",
         ]
     lines.append("END:VCALENDAR")
