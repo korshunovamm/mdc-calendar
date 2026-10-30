@@ -30,6 +30,7 @@ DIRECTIONS = [
 ]
 LEVEL = r"начин|с\s*0|с\s*нуля|нулев|basic|бейсик|бэйсик|beginner"
 EXCLUDE = []  # например [r"закрыт"], чтобы скрыть закрытые группы
+INCLUDE_TEACHERS = ["Нефедов"]  # все занятия этих преподавателей (по фамилии), любой уровень
 EXCLUDE_TEACHERS = ["Генин"]  # занятия этих преподавателей (по фамилии) скрываются
 
 # Этаж/как найти зал — API это не отдаёт, впишите сами, например:
@@ -118,13 +119,12 @@ def main():
     events = {}
     events_teacher = {}
     for s in schedule + extra:
-        if not wanted(style_name(s)):
-            continue
         for d in dates:
             if not occurs_on(s, d) or (s["id"], d) in cancelled:
                 continue
             teacher = substitutes.get((s["id"], d)) or teacher_name((s.get("group") or {}).get("teacher1"))
-            if any(x.lower() in teacher.lower() for x in EXCLUDE_TEACHERS):
+            has = lambda names: any(x.lower() in teacher.lower() for x in names)
+            if has(EXCLUDE_TEACHERS) or not (has(INCLUDE_TEACHERS) or wanted(style_name(s))):
                 continue
             events[(s["id"], d)] = (s, d)
             events_teacher[(s["id"], d)] = teacher
