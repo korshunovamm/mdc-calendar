@@ -1,0 +1,25 @@
+name: Обновить расписание
+
+on:
+  schedule:
+    - cron: "0 6 * * *"   # 09:00 по Москве
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python build_ics.py
+      - name: Закоммитить, если файл изменился
+        run: |
+          git config user.name "dance-bot"
+          git config user.email "dance-bot@users.noreply.github.com"
+          git add docs/dance.ics
+          git diff --cached --quiet || git commit -m "Обновление расписания" && git push
