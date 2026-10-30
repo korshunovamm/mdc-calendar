@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Собирает .ics с занятиями NRG Пролетарская на 14 дней вперёд.
+"""Собирает .ics с занятиями NRG Пролетарская на 30 дней вперёд.
 
 Источник — публичный API impulse CRM, которым пользуется виджет на nrg-style.ru.
 Отменённые занятия не попадают в файл, перенесённые — только в новом времени,
@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 
 API = "https://crmmdcnrgru.impulsecrm.ru/api/public"
 BRANCH_ID = 1  # Пролетарская
-DAYS_AHEAD = 14
+DAYS_AHEAD = 30
 TZ = ZoneInfo("Europe/Moscow")
 OUT = "docs/dance.ics"
 
@@ -122,6 +122,7 @@ def main():
         start = datetime(d.year, d.month, d.day, tzinfo=TZ) + timedelta(minutes=s["minutesBegin"])
         end = datetime(d.year, d.month, d.day, tzinfo=TZ) + timedelta(minutes=s["minutesEnd"])
         teacher = substitutes.get((sid, d)) or teacher_name((s.get("group") or {}).get("teacher1"))
+        surname = teacher.split()[-1] if teacher else ""
         title = style_name(s).strip()
         if (sid, d) in substitutes:
             title += " (замена)"
@@ -134,7 +135,8 @@ def main():
             f"DTSTART:{fmt(start)}",
             f"DTEND:{fmt(end)}",
             f"SUMMARY:{title}",
-            f"LOCATION:NRG Пролетарская{', зал ' + hall if hall else ''}",
+            # вторая строка события в Календаре — это LOCATION
+            f"LOCATION:{' · '.join(x for x in (surname, hall) if x)}",
             f"DESCRIPTION:Преподаватель: {teacher}",
             "END:VEVENT",
         ]
