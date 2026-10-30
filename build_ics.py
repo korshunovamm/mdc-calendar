@@ -29,6 +29,8 @@ DIRECTIONS = [
     r"джаз[\s-]*фанк|jazz[\s-]*funk",
 ]
 LEVEL = r"начин|с\s*0|с\s*нуля|нулев|basic|бейсик|бэйсик|beginner"
+#  Уровень может быть не в названии, а в стикере занятия («НАЧИНАЮЩИЕ», «СТАРТ» и т.п.) — тогда тоже берём.
+STICKER_LEVEL = LEVEL + r"|старт|start"
 EXCLUDE = []  # например [r"закрыт"], чтобы скрыть закрытые группы
 INCLUDE_TEACHERS = ["Нефедов"]  # все занятия этих преподавателей (по фамилии), любой уровень
 EXCLUDE_TEACHERS = ["Генин"]  # занятия этих преподавателей (по фамилии) скрываются
@@ -58,13 +60,33 @@ def teacher_name(t):
     return " ".join(p for p in (t.get("name"), t.get("lastName")) if p)
 
 
-def wanted(name):
-    n = name.lower().replace("ё", "е")
+def norm(text):
+    return text.lower().replace("ё", "е")
+
+
+def wanted(name, stickers=()):
+    n = norm(name)
     if any(re.search(p, n) for p in EXCLUDE):
         return False
     if re.search(STRETCHING, n):
         return True
-    return any(re.search(p, n) for p in DIRECTIONS) and bool(re.search(LEVEL, n))
+    if not any(re.search(p, n) for p in DIRECTIONS):
+        return False
+    return bool(re.search(LEVEL, n)) or any(re.search(STICKER_LEVEL, norm(b)) for b in stickers)
+
+
+def stickers_on(by_schedule, sid, d):
+    """Стикеры занятия sid, действующие в дату d."""
+    out = []
+    for st in by_schedule.get(sid, []):
+        if st.get("period"):
+            ok = (not st.get("dateBegin") or ts_date(st["dateBegin"]) <= d) and \
+                 (not st.get("dateEnd") or ts_date(st["dateEnd"]) >= d)
+        else:
+            ok = st.get("date") is not None and ts_date(st["date"]) == d
+        if ok and st.get("name") and st["name"].strip() not in out:
+            out.append(st["name"].strip())
+    return out
 
 
 def day_ts(d):
@@ -102,6 +124,11 @@ def main():
     changes = [c for c in post("widget_schedule/changes", {"range": rng})["items"]
                if (c.get("branch") or {}).get("id") == BRANCH_ID]
 
+    stickers = {}
+    for st in post("widget_schedule/stickers", {"range": rng})["items"]:
+        if st.get("showClient", True):
+            stickers.setdefault(st["schedule"]["id"], []).append(st)
+
     cancelled = set()   # (id занятия, дата)
     substitutes = {}    # (id занятия, дата) -> преподаватель
     extra = []          # (занятие, дата) — результат переносов
@@ -118,16 +145,19 @@ def main():
 
     events = {}
     events_teacher = {}
+    events_stickers = {}
     for s in schedule + extra:
         for d in dates:
             if not occurs_on(s, d) or (s["id"], d) in cancelled:
                 continue
             teacher = substitutes.get((s["id"], d)) or teacher_name((s.get("group") or {}).get("teacher1"))
+            names = stickers_on(stickers, s["id"], d)
             has = lambda names: any(x.lower() in teacher.lower() for x in names)
-            if has(EXCLUDE_TEACHERS) or not (has(INCLUDE_TEACHERS) or wanted(style_name(s))):
+            if has(EXCLUDE_TEACHERS) or not (has(INCLUDE_TEACHERS) or wanted(style_name(s), names)):
                 continue
             events[(s["id"], d)] = (s, d)
             events_teacher[(s["id"], d)] = teacher
+            events_stickers[(s["id"], d)] = names
 
     now = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     lines = [
@@ -148,6 +178,8 @@ def main():
         area = (s.get("hall") or {}).get("area")
         desc = "\\n".join(x for x in (
             f"Преподаватель: {teacher}" if teacher else "",
+            "Стикеры: " + "; ".join(events_stickers[(sid, d)]) if events_stickers[(sid, d)] else "",
+            f"Заметка: {s['note']}" if s.get("note") else "",
             f"Зал: {hall}" + (f", {area} м²" if area else "") if hall else "",
             HALL_NOTES.get(hall, ""),
         ) if x)
@@ -177,7 +209,7 @@ def main():
         m = s["minutesBegin"]
         tag = " [замена]" if (sid, d) in substitutes else ""
         print(f"{d:%a %d.%m} {m // 60:02d}:{m % 60:02d}  {style_name(s).strip()}  "
-              f"{(s.get('hall') or {}).get('name', '')}{tag}")
+              f"{(s.get('hall') or {}).get('name', '')}{tag}  [{'; '.join(events_stickers[(sid, d)])}]")
     print(f"\nВсего занятий: {len(events)}  (отмен/переносов учтено: {len(cancelled)})", file=sys.stderr)
 
 
