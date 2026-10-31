@@ -33,6 +33,8 @@ LEVEL = r"начин|с\s*0|с\s*нуля|нулев|basic|бейсик|бэйс
 STICKER_LEVEL = LEVEL # + r"|старт|start"
 EXCLUDE = []  # например [r"закрыт"], чтобы скрыть закрытые группы
 INCLUDE_TEACHERS = ["Нефедов"]  # все занятия этих преподавателей (по фамилии), любой уровень
+# пары (фамилия, регулярка направления): занятия этого преподавателя по этому направлению, любой уровень
+INCLUDE_TEACHER_STYLES = [("Гавриш", r"джаз[\s-]*фанк|jazz[\s-]*funk")]
 EXCLUDE_TEACHERS = ["Генин"]  # занятия этих преподавателей (по фамилии) скрываются
 
 # Этаж/как найти зал — API это не отдаёт, впишите сами, например:
@@ -153,7 +155,8 @@ def main():
             teacher = substitutes.get((s["id"], d)) or teacher_name((s.get("group") or {}).get("teacher1"))
             names = stickers_on(stickers, s["id"], d)
             has = lambda names: any(x.lower() in teacher.lower() for x in names)
-            if has(EXCLUDE_TEACHERS) or not (has(INCLUDE_TEACHERS) or wanted(style_name(s), names)):
+            by_style = any(has([surname_]) and re.search(pat, norm(style_name(s))) for surname_, pat in INCLUDE_TEACHER_STYLES)
+            if has(EXCLUDE_TEACHERS) or not (has(INCLUDE_TEACHERS) or by_style or wanted(style_name(s), names)):
                 continue
             events[(s["id"], d)] = (s, d)
             events_teacher[(s["id"], d)] = teacher
